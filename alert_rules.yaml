@@ -1,0 +1,104 @@
+# Grafana / Prometheus alert rules that consume threshold-engine output.
+#
+# The engine writes these synthetic metrics into Mimir:
+#
+#   te_{metric_name}_predicted     — STL forecast value
+#   te_{metric_name}_upper         — upper dynamic bound
+#   te_{metric_name}_lower         — lower dynamic bound
+#   te_{metric_name}_anomaly_score — z-score of current residual
+#   te_{metric_name}_model_ok      — 1 if model trained, 0 if insufficient data
+#
+# Replace metric names below with those defined in your config.yaml.
+# The pattern is always the same regardless of the underlying metric.
+
+groups:
+  - name: threshold_engine_alerts
+    interval: 1m
+    rules:
+
+      # --- Request latency above dynamic upper bound ---
+      - alert: RequestLatencyAnomalous
+        expr: |
+          request_latency_p99
+          >
+          te_request_latency_p99_upper
+          and
+          te_request_latency_p99_model_ok == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Request latency above dynamic threshold"
+          description: >
+            Current p99 latency {{ $value | humanizeDuration }} exceeds the
+            session-aware upper bound for session {{ $labels.session }}.
+
+      # --- High anomaly score (z-score) ---
+      - alert: RequestLatencyHighZScore
+        expr: |
+          te_request_latency_p99_anomaly_score > 4
+          and
+          te_request_latency_p99_model_ok == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Request latency z-score critically high"
+          description: >
+            Anomaly score {{ $value | printf "%.1f" }}σ — well outside normal
+            distribution for session {{ $labels.session }}.
+
+      # --- Session heartbeat gap anomaly ---
+      - alert: SessionHeartbeatGapAnomalous
+        expr: |
+          session_heartbeat_gap_seconds
+          >
+          te_session_heartbeat_gap_upper
+          and
+          te_session_heartbeat_gap_model_ok == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Session heartbeat gap above dynamic threshold"
+          description: >
+            Heartbeat gap {{ $value | humanizeDuration }} exceeds dynamic bound
+            for session {{ $labels.session }}. Possible connectivity issue.
+
+      # --- Queue depth anomaly ---
+      - alert: QueueDepthAnomalous
+        expr: |
+          engine_queue_depth
+          >
+          te_queue_depth_upper
+          and
+          te_queue_depth_model_ok == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue depth above dynamic threshold"
+          description: >
+            Queue depth {{ $value }} exceeds session-aware upper bound
+            for session {{ $labels.session }}.
+
+      # --- Model health: alert if engine stops producing bounds ---
+      - alert: ThresholdEngineModelStale
+        expr: te_request_latency_p99_model_ok == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Threshold engine model not available"
+          description: >
+            The threshold engine has insufficient data to produce bounds for
+            {{ $labels.metric }}. Falling back to static alerting.
+
+      # --- Engine self-health ---
+      - alert: ThresholdEngineCycleStale
+        expr: time() - te_engine_last_cycle_timestamp > 7200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Threshold engine has not completed a cycle in 2 hours"

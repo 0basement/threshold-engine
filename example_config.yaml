@@ -1,0 +1,118 @@
+# threshold-engine configuration
+#
+# All exchange-specific knowledge lives here, not in the engine code.
+# Copy this file, rename it, and configure for your environment.
+#
+# This example uses generic names throughout. Replace sessions, events,
+# calendar, and metrics with values appropriate for your exchange or
+# trading platform.
+
+prometheus:
+  url: "http://mimir:9009/prometheus"
+  remote_write_url: "http://mimir:9009/api/v1/push"
+  step: "60s"
+  lookback_days: 90
+
+engine:
+  update_interval_minutes: 60
+  prediction_horizon_minutes: 30
+  anomaly_multiplier: 1.5
+  min_training_points: 1000
+  output_metric_prefix: "te"
+
+# Sessions define named time windows with distinct expected behaviour.
+# The engine trains a separate baseline model for each session.
+# Define as many as your platform requires.
+sessions:
+  - name: pre_open
+    days: [Mon, Tue, Wed, Thu, Fri]
+    start: "07:00"
+    end: "08:00"
+    timezone: "UTC"
+
+  - name: market_open
+    days: [Mon, Tue, Wed, Thu, Fri]
+    start: "08:00"
+    end: "09:00"
+    timezone: "UTC"
+
+  - name: continuous
+    days: [Mon, Tue, Wed, Thu, Fri]
+    start: "09:00"
+    end: "16:30"
+    timezone: "UTC"
+
+  - name: market_close
+    days: [Mon, Tue, Wed, Thu, Fri]
+    start: "16:30"
+    end: "17:30"
+    timezone: "UTC"
+
+  - name: overnight
+    days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+    start: "17:30"
+    end: "07:00"
+    timezone: "UTC"
+
+# Named intraday events within sessions that warrant separate baselines.
+# Examples: auction open/close, settlement windows, scheduled releases.
+events:
+  - name: auction_open
+    days: [Mon, Tue, Wed, Thu, Fri]
+    start: "08:00"
+    end: "08:05"
+    timezone: "UTC"
+
+  - name: auction_close
+    days: [Mon, Tue, Wed, Thu, Fri]
+    start: "16:25"
+    end: "16:35"
+    timezone: "UTC"
+
+# Calendar: exchange holidays and special trading days.
+# ISO 8601 dates. The engine excludes holidays from training baselines.
+calendar:
+  holidays:
+    - "2025-12-25"
+    - "2025-12-26"
+    - "2026-01-01"
+    - "2026-04-03"
+    - "2026-04-06"
+    - "2026-05-04"
+    - "2026-05-25"
+    - "2026-08-31"
+
+  # Half-days: platform closes early. Engine uses a separate baseline.
+  half_days:
+    - date: "2025-12-24"
+      close_time: "13:00"
+
+# Metrics to model. Replace these with the metrics relevant to your platform.
+#
+# Common trading infrastructure metrics to consider:
+#   - Request/order latency (p95, p99)
+#   - Session connectivity indicators
+#   - Queue or backlog depth
+#   - Throughput / messages per second
+#   - Error or rejection rates
+#   - Data publish latency
+metrics:
+  - name: request_latency_p99
+    query: 'histogram_quantile(0.99, sum(rate(request_duration_seconds_bucket[5m])) by (le))'
+    unit: seconds
+
+  - name: session_heartbeat_gap
+    query: 'session_heartbeat_gap_seconds'
+    unit: seconds
+
+  - name: queue_depth
+    query: 'engine_queue_depth'
+    unit: messages
+
+  - name: rejection_rate
+    query: 'sum(rate(rejections_total[5m]))'
+    unit: per_second
+
+  - name: publish_latency_p95
+    query: 'histogram_quantile(0.95, sum(rate(publish_duration_seconds_bucket[5m])) by (le))'
+    unit: seconds
