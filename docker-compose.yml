@@ -1,0 +1,43 @@
+version: "3.9"
+
+# Minimal local stack: Mimir (metrics storage) + threshold-engine.
+#
+# Usage:
+#   1. Copy example_config.yaml to config.yaml and set your metric queries.
+#   2. docker-compose up --build
+#   3. Query bounds: http://localhost:9009/prometheus/api/v1/query?query=te_request_latency_p99_upper
+#   4. Load alert_rules.yaml into Grafana/Prometheus to start alerting.
+#
+# If you already have a running Mimir or Prometheus remote_write target,
+# set the URLs in config.yaml and run the engine directly:
+#   pip install -e .
+#   threshold-engine --config config.yaml
+
+services:
+  mimir:
+    image: grafana/mimir:latest
+    command: ["-config.file=/etc/mimir/mimir.yaml"]
+    volumes:
+      - ./mimir/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - mimir-data:/data/mimir
+    ports:
+      - "9009:9009"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9009/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  engine:
+    build: .
+    volumes:
+      - ./example_config.yaml:/config/config.yaml:ro
+    depends_on:
+      mimir:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  mimir-data:
